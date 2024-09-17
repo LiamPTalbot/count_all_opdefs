@@ -1,0 +1,73 @@
+import { 
+    Function, 
+    FunctionsMap,
+    Integer
+    } from "@foundry/functions-api";
+
+import {
+     Objects,
+     ObjectSet, 
+     Asset
+     } from "@foundry/ontology-api";
+
+export class MTUDigitalMotherFunctions {
+    
+//===============================================================Part 1==============================================================================================================//
+//----------------Function to return a FunctionsMap, which acts as a map between one object instance and the value to display in the derived column----------------------------------//
+    @Function()
+    public async allOpdefsColumn(
+        myEngines: ObjectSet<Asset>
+        ): Promise<FunctionsMap<Asset, Integer>>{
+
+//--------------------Initialise the Map from input Asset (Engine Asset ID) to output Integer (number of OPDEFs ever raised against it)---------------------------------------------//
+        const map = new FunctionsMap<Asset, Integer>();
+
+//---------------------Retrieve the intial Object Set (Assets) from the Ontology and turn in to an array so we can work with it-----------------------------------------------------//
+        const myEnginesAsArray = myEngines.all();
+
+        await Promise.all(myEnginesAsArray.map(async (currentEngine) => {
+                const count = await this.countOpdefs(currentEngine);
+
+                map.set(currentEngine, count);
+        }));
+        return map;
+        }
+
+//=============================================================Part 2================================================================================================================//
+//-----------------------------------Function to count all Opdefs raised against the Asset (engine) and all its descendents----------------------------------------------------------//
+
+        @Function()
+        public async countOpdefs(
+                currentEngine : Asset
+        ): Promise<Integer> {
+
+//--------Pivoting from one Object Type to another, see https://www.palantir.com/docs/foundry/functions/api-objects-links/#link-types-----------------------------------------------//
+//--------Filtering to the relevant dates, see https://www.palantir.com/docs/foundry/functions/api-object-sets/#filtering-----------------------------------------------------------//
+
+//--------Count all Opdefs associated to the Level 5 Asset (Engine)-----------------------------------------------------------------------------------------------------------------// 
+                const opdefArrayforLevel5 = await Objects.search()
+                                                .asset([currentEngine])
+                                                .searchAroundOpdefKey()
+                                                .count();
+
+//--------Get array of all descendant Assets------------------------------------------------------------------------------------------------------------------------------------------//
+                const opdefArrayforDescendantAssets = await Objects.search()
+                                                        .asset([currentEngine])
+                                                        .searchAroundDescendants()
+                                                        .all();
+
+                const descendantCountsPromises = opdefArrayforDescendantAssets
+                                                .map(async (descendantAsset) => {
+                                                        return Objects.search()
+                                                                .asset([descendantAsset])
+                                                                .searchAroundOpdefKey()
+                                                                .count();
+                                                });
+
+                const descendantCounts = await Promise.all(descendantCountsPromises);
+
+                const totalOpdefCount = (opdefArrayforLevel5 || 0) + descendantCounts.reduce((acc : number, count) => acc + (count || 0), 0);
+
+                return totalOpdefCount;
+        }
+}
